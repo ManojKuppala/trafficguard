@@ -4,7 +4,12 @@ from ultralytics import YOLO
 import easyocr
 import re
 import uuid
+import torch
 from pathlib import Path
+
+# Limit CPU threads to prevent massive thread pool memory overhead on multi-core host servers
+torch.set_num_threads(1)
+cv2.setNumThreads(0)
 
 # ─────────────────────────────────────────────────────────────────────────────
 
