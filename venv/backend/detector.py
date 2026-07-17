@@ -23,10 +23,9 @@ RESULTS_DIR = FRONTEND_DIR / "static" / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Lazy model / OCR loading
+# Memory-Optimized Dynamic Inference
 # ─────────────────────────────────────────────────────────────────────────────
-_models: dict = {}
-_ocr = None
+import gc
 
 def _validate_models():
     """Validate that all required model files exist at startup."""
@@ -37,18 +36,15 @@ def _validate_models():
     if missing:
         raise FileNotFoundError(f"Missing model files: {', '.join(missing)}")
 
-def _get_model(name: str) -> YOLO:
-    if name not in _models:
-        if not MODEL_PATHS[name].exists():
-            raise FileNotFoundError(f"Model file not found: {MODEL_PATHS[name]}")
-        _models[name] = YOLO(str(MODEL_PATHS[name]))
-    return _models[name]
-
-def _get_ocr() -> easyocr.Reader:
-    global _ocr
-    if _ocr is None:
-        _ocr = easyocr.Reader(["en"], gpu=False)
-    return _ocr
+def _run_yolo_inference(name: str, frame, **kwargs):
+    """Load a model, run inference, delete the model from memory, and run garbage collection."""
+    if not MODEL_PATHS[name].exists():
+        raise FileNotFoundError(f"Model file not found: {MODEL_PATHS[name]}")
+    model = YOLO(str(MODEL_PATHS[name]))
+    result = model(frame, **kwargs)[0]
+    del model
+    gc.collect()
+    return result
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Geometry helpers
@@ -131,11 +127,13 @@ def _read_plate(frame: np.ndarray, plate_box: list) -> str:
         return "UNREADABLE"
 
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    ocr  = _get_ocr()
+    
+    # Load OCR reader ONCE for the current plate crop (to avoid loading/unloading inside the loop)
+    reader = easyocr.Reader(["en"], gpu=False)
     candidates = []
 
     for img in _preprocess_variants(gray):
-        results = ocr.readtext(
+        results = reader.readtext(
             img, detail=1,
             allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ",
             paragraph=False
@@ -147,6 +145,10 @@ def _read_plate(frame: np.ndarray, plate_box: list) -> str:
         # score: does it match Indian plate pattern?
         score = 2 if _INDIAN_PLATE_RE.search(text) else (1 if len(text) >= 4 else 0)
         candidates.append((score, len(text), text))
+
+    # Free EasyOCR memory immediately after processing the plate
+    del reader
+    gc.collect()
 
     if not candidates:
         return "UNREADABLE"
@@ -160,12 +162,12 @@ def _read_plate(frame: np.ndarray, plate_box: list) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Collect all detections from a model result into categorised lists
 # ─────────────────────────────────────────────────────────────────────────────
-def _parse_detections(result, model: YOLO, conf_thresh: float):
+def _parse_detections(result, conf_thresh: float):
     motos, persons, helmets, no_helmets, phones, plates = [], [], [], [], [], []
     for box in result.boxes:
         if float(box.conf[0]) < conf_thresh:
             continue
-        cls_name = model.names[int(box.cls[0])].lower()
+        cls_name = result.names[int(box.cls[0])].lower()
         b = [int(v) for v in box.xyxy[0].tolist()]
         conf = float(box.conf[0])
 
@@ -197,33 +199,25 @@ def detect_violations(frame: np.ndarray, frame_id: int = 0,
     """
     violations = []
 
-    # ── Run all 4 models ──────────────────────────────────────────
-    moto_model = _get_model("motorcycle")
-    hel_model  = _get_model("helmet")
-    pp_model   = _get_model("person_phone")
-    lic_model  = _get_model("license")
-
     # Stricter thresholds to reduce false positives:
     # - Motorcycle: 0.30 (very strict)
     # - Helmet/Person: 0.30 (strict - only high confidence detections)
     # - License plate: 0.20 (moderate)
-    moto_res = moto_model(frame, conf=conf_moto, verbose=False)[0]
-    hel_res  = hel_model (frame, conf=0.15,      verbose=False)[0]
-    pp_res   = pp_model  (frame, conf=0.15,      verbose=False)[0]
-    lic_res  = lic_model (frame, conf=0.15,      verbose=False)[0]
-
-    # ── Parse detections from each model, then MERGE ──────────────
+    moto_res = _run_yolo_inference("motorcycle", frame, conf=conf_moto, verbose=False)
     m_motos, m_persons, m_helmets, m_no_helmets, m_phones, m_plates = \
-        _parse_detections(moto_res, moto_model, conf_moto)
+        _parse_detections(moto_res, conf_moto)
 
+    hel_res  = _run_yolo_inference("helmet", frame, conf=0.15, verbose=False)
     _, _, h_helmets, h_no_helmets, _, _ = \
-        _parse_detections(hel_res, hel_model, 0.15)
+        _parse_detections(hel_res, 0.15)
 
+    pp_res   = _run_yolo_inference("person_phone", frame, conf=0.15, verbose=False)
     _, pp_persons, _, _, pp_phones, _ = \
-        _parse_detections(pp_res, pp_model, 0.15)
+        _parse_detections(pp_res, 0.15)
 
+    lic_res  = _run_yolo_inference("license", frame, conf=0.15, verbose=False)
     _, _, _, _, _, l_plates = \
-        _parse_detections(lic_res, lic_model, 0.15)
+        _parse_detections(lic_res, 0.15)
 
 
     # Merge lists (combined detections from all relevant models)

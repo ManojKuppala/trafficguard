@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).parent.resolve()
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
 sys.path.insert(0, str(BASE_DIR))
 
-from detector import detect_violations, _validate_models, _get_ocr
+from detector import detect_violations, _validate_models
 from challan  import generate_challan
 from database import init_db, get_all_challans
 
@@ -28,14 +28,7 @@ except FileNotFoundError as e:
     print(f"[✗] Model validation failed: {e}")
     raise
 
-# Pre-load OCR to avoid first-request freeze (10-30s delay)
-print("[...] Pre-loading OCR model (EasyOCR)...")
-try:
-    _get_ocr()
-    print("[✓] OCR model pre-loaded successfully")
-except Exception as e:
-    print(f"[!] Warning: OCR pre-loading failed (will retry on first use): {e}")
-
+# SQLite initialization
 init_db()   # create tables if they don't exist
 
 UPLOAD_DIR  = FRONTEND_DIR / "static" / "uploads"
@@ -56,11 +49,10 @@ jobs_lock = threading.Lock()  # Protect concurrent access to jobs dict
 # ──────────────────────────────────────────────────────────────────────────────
 def _detect_motorcycles_in_frame(frame) -> bool:
     """Check if any motorcycles are detected in the frame. Used to distinguish 'no motorcycles' vs 'no violations'."""
-    from detector import _get_model, _parse_detections
+    from detector import _run_yolo_inference, _parse_detections
     try:
-        moto_model = _get_model("motorcycle")
-        moto_res = moto_model(frame, conf=0.30, verbose=False)[0]
-        motos, _, _, _, _, _ = _parse_detections(moto_res, moto_model, 0.30)
+        moto_res = _run_yolo_inference("motorcycle", frame, conf=0.30, verbose=False)
+        motos, _, _, _, _, _ = _parse_detections(moto_res, 0.30)
         return len(motos) > 0
     except Exception:
         return False  # If detection fails, assume no motorcycles
