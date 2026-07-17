@@ -7,7 +7,7 @@ TrafficGuard AI is an automated traffic enforcement system that uses computer vi
 - **Triple Riding Detection**: Detects if 3 or more people are riding a single motorcycle.
 - **Mobile Usage Detection**: Spots riders using mobile phones while driving.
 - **Automated License Plate Extraction**: Crops and reads the license plate of the violating motorcycle.
-- **Automated E-Challan**: Generates a consolidated JSON report with fine breakdowns.
+- **Automated E-Challan**: Generates and persists digital tickets with fine breakdowns into a relational database.
 
 ---
 
