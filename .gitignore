@@ -1,0 +1,26 @@
+# Ignore Python virtual environment folders inside venv/
+venv/Include/
+venv/Lib/
+venv/Scripts/
+venv/share/
+venv/pyvenv.cfg
+venv/pip-selfcheck.json
+
+# Ignore Python cache files
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore local database and dynamic uploads/results
+venv/backend/trafficguard.db
+venv/frontend/static/uploads/*
+venv/frontend/static/results/*
+
+# Keep the directories but ignore their contents (optional placeholder)
+!venv/frontend/static/uploads/.gitkeep
+!venv/frontend/static/results/.gitkeep
+
+# OS generated files
+.DS_Store
+Thumbs.db
