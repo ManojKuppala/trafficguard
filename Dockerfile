@@ -5,6 +5,7 @@ FROM python:3.10-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PORT=7860
+ENV MALLOC_ARENA_MAX=2
 
 # Set the working directory inside the container
 WORKDIR /app

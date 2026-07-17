@@ -27,6 +27,16 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 # ─────────────────────────────────────────────────────────────────────────────
 import gc
 
+def _trim_memory():
+    """Force release of allocated C/Python memory back to the OS (Linux glibc)."""
+    gc.collect()
+    try:
+        import ctypes
+        libc = ctypes.CDLL("libc.so.6")
+        libc.malloc_trim(0)
+    except Exception:
+        pass
+
 def _validate_models():
     """Validate that all required model files exist at startup."""
     missing = []
@@ -37,13 +47,13 @@ def _validate_models():
         raise FileNotFoundError(f"Missing model files: {', '.join(missing)}")
 
 def _run_yolo_inference(name: str, frame, **kwargs):
-    """Load a model, run inference, delete the model from memory, and run garbage collection."""
+    """Load a model, run inference, delete the model from memory, and release RAM."""
     if not MODEL_PATHS[name].exists():
         raise FileNotFoundError(f"Model file not found: {MODEL_PATHS[name]}")
     model = YOLO(str(MODEL_PATHS[name]))
     result = model(frame, **kwargs)[0]
     del model
-    gc.collect()
+    _trim_memory()
     return result
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -148,7 +158,7 @@ def _read_plate(frame: np.ndarray, plate_box: list) -> str:
 
     # Free EasyOCR memory immediately after processing the plate
     del reader
-    gc.collect()
+    _trim_memory()
 
     if not candidates:
         return "UNREADABLE"
